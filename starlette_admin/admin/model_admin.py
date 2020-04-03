@@ -1,28 +1,31 @@
-from sqlalchemy import orm
-from starlette_core.database import Base
+import sqlalchemy as sa
+from sqlalchemy.sql.selectable import Select
+from starlette.exceptions import HTTPException
+from starlette_core.database import database
 
-from .base import BaseAdmin
+from starlette_admin.admin import BaseAdmin
 
 
 class ModelAdmin(BaseAdmin):
     """ The base admin class for sqlalchemy crud operations. """
 
-    model_class: Base
+    model_class: sa.Table
+    object_str_function = lambda self: self["id"]
 
     @classmethod
-    def get_default_ordering(cls, qs: orm.Query) -> orm.Query:
+    def get_default_ordering(cls, qs: Select) -> Select:
         return qs.order_by("id")
 
     @classmethod
-    def get_search_results(cls, qs: orm.Query, term: str) -> orm.Query:
+    def get_search_results(cls, qs: Select, term: str) -> Select:
         raise NotImplementedError()
 
     @classmethod
     def get_ordered_results(
-        cls, qs: orm.Query, order_by: str, order_direction: str
-    ) -> orm.Query:
-        if order_by and order_direction and getattr(cls.model_class, order_by):
-            field = getattr(cls.model_class, order_by)
+        cls, qs: Select, order_by: str, order_direction: str
+    ) -> Select:
+        if order_by and order_direction and hasattr(cls.model_class.c, order_by):
+            field = getattr(cls.model_class.c, order_by)
             if order_direction == "desc":
                 qs = qs.order_by(field.desc())
             else:
@@ -30,8 +33,8 @@ class ModelAdmin(BaseAdmin):
         return qs
 
     @classmethod
-    def get_list_objects(cls, request):
-        qs = cls.get_queryset()
+    async def get_list_objects(cls, request):
+        qs = cls.model_class.select()
 
         # if enabled, call `cls.get_search_results`
         search = request.query_params.get("search", "").strip().lower()
@@ -46,30 +49,33 @@ class ModelAdmin(BaseAdmin):
         else:
             qs = cls.get_default_ordering(qs)
 
-        return qs.all()
+        return await database.fetch_all(qs)
 
     @classmethod
-    def get_queryset(cls) -> orm.Query:
-        return cls.model_class.query
-
-    @classmethod
-    def get_object(cls, request):
+    async def get_object(cls, request):
         id = request.path_params["id"]
-        return cls.get_queryset().get_or_404(id)
+        qs = cls.model_class.select().where(cls.model_class.c.id == id)
+        obj = await database.fetch_one(qs)
+        if not obj:
+            raise HTTPException(404)
+        obj.__class__.__str__ = cls.object_str_function
+        return obj
 
     @classmethod
     async def do_create(cls, form, request):
-        instance = cls.model_class()
-        form.populate_obj(instance)
-        instance.save()
-        return instance
+        qs = cls.model_class.insert().values(**form.data)
+        return await database.execute(qs)
 
     @classmethod
     async def do_delete(cls, instance, form, request):
-        instance.delete()
+        qs = cls.model_class.delete().where(cls.model_class.c.id == instance["id"])
+        await database.execute(qs)
 
     @classmethod
     async def do_update(cls, instance, form, request):
-        form.populate_obj(instance)
-        instance.save()
-        return instance
+        qs = (
+            cls.model_class.update()
+            .where(cls.model_class.c.id == instance["id"])
+            .values(**form.data)
+        )
+        return await database.execute(qs)

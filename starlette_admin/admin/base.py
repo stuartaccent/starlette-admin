@@ -9,9 +9,9 @@ from starlette_core.messages import message
 from starlette_core.paginator import InvalidPage, Paginator
 from wtforms.form import Form
 
-from ..config import config
-from ..exceptions import MissingFormError
-from ..site import AdminSite
+from starlette_admin.config import config
+from starlette_admin.exceptions import MissingFormError
+from starlette_admin.site import AdminSite
 
 
 class BaseAdmin:
@@ -61,7 +61,7 @@ class BaseAdmin:
         return context
 
     @classmethod
-    def get_list_objects(cls, request):
+    async def get_list_objects(cls, request):
         """
         Return the list of objects to render in the list view.
 
@@ -84,7 +84,7 @@ class BaseAdmin:
         raise NotImplementedError()
 
     @classmethod
-    def get_object(cls, request):
+    async def get_object(cls, request):
         raise NotImplementedError()
 
     @classmethod
@@ -136,7 +136,7 @@ class BaseAdmin:
             }
         )
 
-        list_objects = cls.get_list_objects(request)
+        list_objects = await cls.get_list_objects(request)
 
         if cls.paginate_by:
             paginator, page, list_objects, is_paginated = cls.paginate(
@@ -200,11 +200,11 @@ class BaseAdmin:
         if not cls.update_form:
             raise MissingFormError()
 
-        instance = cls.get_object(request)
+        instance = await cls.get_object(request)
         context = cls.get_context(request)
         form_kwargs = {
             "form_cls": cls.update_form,
-            "data": instance if isinstance(instance, dict) else None,
+            "data": instance,
             "obj": instance if not isinstance(instance, dict) else None,
         }
 
@@ -236,11 +236,11 @@ class BaseAdmin:
         if not cls.delete_form:
             raise MissingFormError()
 
-        instance = cls.get_object(request)
+        instance = await cls.get_object(request)
         context = cls.get_context(request)
         form_kwargs = {
             "form_cls": cls.delete_form,
-            "data": instance if isinstance(instance, dict) else None,
+            "data": instance,
             "obj": instance if not isinstance(instance, dict) else None,
         }
 
